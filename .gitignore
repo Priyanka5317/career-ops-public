@@ -1,0 +1,119 @@
+# Personal data (user fills these)
+data/applications.md
+data/pipeline.md
+data/scan-history.tsv
+reports/*.md
+!reports/.gitkeep
+output/*
+!output/.gitkeep
+batch/logs/*
+!batch/logs/.gitkeep
+batch/batch-state.tsv
+batch/batch-input.tsv
+batch/tracker-additions/*.tsv
+!batch/tracker-additions/.gitkeep
+jds/*
+!jds/.gitkeep
+
+# User config and customization (never auto-updated)
+config/profile.yml
+portals.yml
+modes/_profile.md
+.update-dismissed
+.update-lock
+
+# Generated
+.resolved-prompt-*
+node_modules/
+
+# OS
+.DS_Store
+*.mov
+*.mp4
+
+# Claude Code local
+.claude/settings.local.json
+.claude/memory/
+career-dashboard
+
+# User layer for the nightly pipeline
+config/industries.yml
+data/job-feed.tsv
+data/shortlist.tsv
+data/skip-list.tsv
+data/company-universe.tsv
+data/cache/
+reports/nightly/*
+!reports/nightly/.gitkeep
+
+data/visa-cache.tsv
+
+# Secrets. Added 2026-09-12: .env was NOT ignored and was about to hold a
+# Google Custom Search API key.
+.env
+.env.*
+!.env.example
+
+# Personal data that was NOT ignored. Audited 2026-09-17: `git status` listed
+# data/contacts.tsv as untracked-but-stageable, so a `git add .` would have
+# committed 682 real people (names, titles, emails, phone numbers, LinkedIn
+# URLs). Every sibling PII file above was already ignored; these were missed.
+# The repo is configured to look public (CODEOWNERS, FUNDING.yml, issue
+# templates, plugin registry), which is exactly where this would hurt.
+data/contacts.tsv
+data/job-tracking.xlsx
+data/job-tracking-LOCKED.xlsx
+data/seen-jobs.tsv
+data/linkedin-feed.tsv
+data/board-feed.tsv
+data/board-queue.tsv
+data/build-queue.tsv
+data/extracted.tsv
+data/gated.tsv
+data/websearch-feed.tsv
+data/dropped-below-3.tsv
+data/terminal-drops.tsv
+data/below-3.0-*.tsv
+data/duplicates-*.tsv
+data/*.bak.tsv
+data/*.bak.md
+
+# ---------------------------------------------------------------------------
+# Hardening for a PUBLIC copy. The working tree this snapshot came from had
+# real job-search output in these paths; none of it may ever be committed here.
+# ---------------------------------------------------------------------------
+
+# Generated application artifacts (real, identifying documents)
+cover-letters/
+resumes/
+pitch-decks/
+interview-prep/*
+!interview-prep/.gitkeep
+!interview-prep/README.md
+
+# Personal CV and the user-layer pipeline rules (copy the .example files)
+/cv.md
+modes/nightly-rules.md
+config/industries.yml
+config/nightly.yml
+
+# Tracker rows merged out of batch runs
+batch/tracker-additions/merged/
+
+# Scratch, scrape dumps and cookie jars
+.scratch-*
+.tmp-*
+.tmp-jd/
+*.bak
+*.bak.*
+.pre-update-backup-*/
+
+# Spreadsheets and Office lock files
+*.xlsx
+~$*
+
+# Python + agent worktrees
+__pycache__/
+*.pyc
+.claude/worktrees/
+.claude/settings.local.json.bak

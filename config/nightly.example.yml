@@ -1,0 +1,537 @@
+# nightly.example.yml -- copy to config/nightly.yml and retune.
+#
+# The numbers and the reasoning below come from a real run history and are
+# kept because the reasoning is the useful part. Retune every cap, title list
+# and threshold for your own search before relying on them.
+#
+# nightly.yml — configuration for the nightly job pipeline.
+#
+# Read by nightly-shortlist.mjs (role_families, caps, experience),
+# nightly-boards.mjs (boards, schedule) and by the agents in .claude/agents/
+# (thresholds, budgets). Edit this file to retarget the whole pipeline; no agent
+# prompt should need changing to add a role title.
+
+# ---------------------------------------------------------------- role families
+#
+# A posting enters the shortlist only if its TITLE contains one of these
+# substrings. This list is therefore the allowlist as well as the classifier:
+# anything unmatched is dropped as 'no-target-role-match' before it costs a
+# token. Matching is case-insensitive substring, so keep entries short.
+#
+# weight biases the rank order only. It never decides fit.
+#
+# Narrowed to the titles the candidate actually named:
+#   Data Analyst, Data Scientist, Data Engineer, AI Engineer, GTM Engineer,
+#   Business Analyst, Business Intelligence Analyst/Specialist, "etc."
+# Everything below is that list plus tight adjacents. REMOVED the same day:
+#   - the whole product family (product/program manager, product owner,
+#     product operations, APM, product strategy) - the candidate named none of them
+#   - the finance-flavoured analysts (financial, risk, marketing, quantitative)
+#   - quota-shaped GTM titles (sales engineer, technical account manager)
+#   - loose data ops titles (etl developer, data quality, data governance,
+#     operations analyst)
+# Breadth was the problem: 60+ titles fed 1,133 feed rows into the gates and
+# spent budget on reqs the candidate would never apply to.
+
+role_families:
+  data:
+    weight: 1.0
+    titles:
+      - "data analyst"
+      - "data scientist"
+      - "data science"
+      - "data engineer"
+      - "analytics engineer"
+      - "business analyst"
+      - "business intelligence"
+      - "bi analyst"
+      - "bi developer"
+      - "bi engineer"
+      - "bi specialist"
+      - "insights analyst"
+      - "reporting analyst"
+      - "analytics analyst"
+      - "decision scientist"
+
+  ai:
+    weight: 1.0
+    # NARROWED 2026-09-11, second pass. The candidate named "AI Engineer" and nothing else
+    # in this family. Removed: ai developer, ai analyst, applied scientist,
+    # machine learning engineer, ml engineer, mlops, nlp engineer, research
+    # engineer.
+    #
+    # Measured on the 2026-09-11 23:00 shortlist: this family produced 45 of 120
+    # rows and was the single biggest source of off-target work - Robotics AI
+    # Engineer (Sensor Calibration), Applied AI Engineer (Silicon Engineering),
+    # Applied AI Engineer (Kernel Performance), Machine Learning Engineer
+    # (Foundation Models), Research Engineer 1/2 (Embedded Development),
+    # Security Research Engineer (AI Safety), Associate Applied Scientist.
+    # None are entry-level data roles. Removing these eight titles drops 26 of
+    # the 120 on its own.
+    #
+    # "ml engineer" is deliberately gone rather than filtered: every ML req that
+    # surfaced that night was robotics, autonomy or foundation-model research.
+    titles:
+      - "ai engineer"
+      - "applied ai"
+      - "llm engineer"
+      - "generative ai"
+      - "genai"
+
+  gtm:
+    weight: 1.0
+    # Narrowed from the candidate's own red-marking in the workbook. They
+    # marked 20 of the 23 GTM-family packs as not relevant, and the three they
+    # LEFT are the tell: S&P Global "BI & AI Solutions Specialist", Zscaler
+    # "AI Solutions Engineer", Lyft "Data Analyst, Go-To-Market Sales Insights".
+    #
+    # So the rejection is specifically FORWARD DEPLOYED ENGINEER and generic
+    # SOLUTIONS/SOLUTION ENGINEER, not GTM as a concept. "ai solutions" stays.
+    #
+    # NOTE this narrows the 2026-08-17 AI GTM pivot, which named Forward Deployed
+    # Engineer as one of three target archetypes. Confirmed with the candidate before the
+    # change rather than inferred - a month-old stated target is not something to
+    # drop on a colour alone.
+    titles:
+      - "gtm engineer"
+      - "go-to-market engineer"
+      - "gtm analyst"
+      - "ai solutions"
+    # NARROWED 2026-09-11 alongside the ai family. Removed: customer engineer,
+    # implementation engineer, deployment engineer, partner engineer, growth
+    # engineer. The candidate's named GTM targets are GTM Engineer, Forward Deployed
+    # Engineer and AI Solutions Engineer; the five removed titles are adjacent
+    # job families, not theirs.
+
+# ---------------------------------------------------------------- build policy
+#
+# The build rule, specific to this nightly pipeline:
+#   score > 4.0        full pack, deck included
+#   3.0 <= score <= 4.0 everything EXCEPT the deck
+#   score < 3.0        digest line only, no artifacts
+#
+# This is a deliberate widening of the interactive rule (which asks before
+# building at or below 4.0). The nightly run does not ask, because there is
+# nobody awake to answer; the digest reports what it chose to build.
+
+build_policy:
+  full_pack_above: 4.0        # exclusive - 4.1 gets a deck, 4.0 does not
+  no_deck_floor: 3.0          # inclusive - 3.0 through 4.0 builds without a deck
+  artifacts_full: [resume, cover_letter, deck, recruiter_email, hm_email, linkedin_dm]
+  artifacts_no_deck: [resume, cover_letter, recruiter_email, hm_email, linkedin_dm]
+
+# ---------------------------------------------------------------- schedule
+#
+# Operator instruction: "check 80 boards every 5 hrs from 11 PM, then
+# next at 4 am. Run different boards the next night. ... once everything is
+# finalized after 4 am run.. run full pack build at 9 am".
+#
+# So the night splits into two DISCOVER runs and one BUILD run:
+#
+#   23:00  discover  boards slice 1 + repos slice 1 + LinkedIn terms slice 1
+#   04:00  discover  boards slice 2 + repos slice 2 + LinkedIn terms slice 2
+#   09:00  build     full packs, from the queue the 04:00 run finalized
+#
+# This is the single most important change to the old design. Discovery and
+# building no longer share one session budget, so a long visa gate can no longer
+# starve the builds - which is exactly how 2026-09-08 ended with seven folders
+# holding one file each.
+#
+# A discover run writes NO artifacts. It may write jds/, the tracker row, the
+# queue and the caches, and nothing else.
+#
+# Every rotation cursor advances per run, so the 04:00 run never repeats the
+# 23:00 run's boards, repos or search terms, and tomorrow night starts where
+# tonight stopped.
+#
+# Registered as ONE Task Scheduler task with three daily triggers, so
+# MultipleInstances=IgnoreNew still prevents an overlap if a run runs long.
+
+# THESE NUMBERS ARE THE AUTHORITATIVE ONES. scripts/nightly-phase.mjs passes
+# them straight through as `--take` / `--rotate` / `--terms`, which means the
+# `per_run` values in the boards/repos/linkedin blocks below are OVERRIDDEN and
+# are only fallbacks for running those scripts by hand.
+#
+# That mismatch was a live bug until 2026-09-10: `boards.per_run` had been
+# raised to 120 but this block still said 80, so the raise never took effect and
+# every run kept scanning 80. Keep the two in step, or change the driver.
+schedule:
+  runs:
+    - at: "23:00"
+      phase: discover
+      boards: 250          # half the universe per run, so 2 discover runs sweep it all nightly
+      repos: 4             # all four public repos; rotating them saved nothing anyway
+      linkedin_terms: 8
+    - at: "04:00"
+      phase: discover
+      boards: 250
+      repos: 4
+      linkedin_terms: 8
+    - at: "09:00"
+      phase: build
+      boards: 0
+      repos: 0
+      linkedin_terms: 0
+
+  # Written by the discover runs, consumed by the 09:00 build run. The build run
+  # reads ONLY this file: it never re-scrapes, never re-gates and never
+  # re-scores, because all three already happened overnight.
+  queue_file: data/build-queue.tsv
+
+# ---------------------------------------------------------------- boards
+#
+# THE uncapped cost in the old pipeline. job-scraper.md Step 2 said "for
+# companies in company-universe.tsv that the repos did not cover, hit their
+# boards directly" with no ceiling - one agent, up to 462 boards, every response
+# landing in its context. caps constrained the cheap end of the funnel and left
+# the expensive end wide open.
+#
+# Now: nightly-boards.mjs hands the agent a fixed queue of ALREADY-RESOLVED
+# boards and the agent may not fetch anything outside it.
+#
+# The rotation cursor persists in data/board-cursor.json. Ordering is by
+# industry `priority` from config/industries.yml, then by first_seen, so the
+# priority-1 industries (AI-native, data infra, enterprise software) are swept
+# first on a cold cursor and the rotation stays stable as the universe grows.
+
+boards:
+  per_run: 120                # boards handed to the scraper per run (RAISED 2026-09-10: only ~40% of a slice emits, so 80 considered yielded 40 and 32)
+  cursor_file: data/board-cursor.json
+  queue_file: data/board-queue.tsv
+
+  # 339 of 462 universe rows were `ats: unknown` on 2026-09-09 - 73% of their
+  # company universe was unreachable, which is why the feed leaned entirely on
+  # the four public repos. Probing is a plain HTTPS GET against the vendor job
+  # APIs, so it costs ZERO tokens and runs in-process. Resolved rows are
+  # upgraded in company-universe.tsv in place and stay resolved.
+  probe_unknown_ats: true
+  # smartrecruiters added 2026-09-10 after live testing: it resolved ServiceNow
+  # and Gong, both of which had failed on all of greenhouse/ashby/lever.
+  # DELIBERATELY EXCLUDED after testing the same day: bamboohr returns HTTP 200
+  # with HTML for EVERY slug, so it would false-positive on everything; personio
+  # returned 429 on every request; teamtailor matched nothing in this universe.
+  probe_vendors: [greenhouse, ashby, lever, smartrecruiters]
+  probe_timeout_ms: 6000
+  probe_concurrency: 6
+
+  # An `unknown` row that survives probing is skipped rather than emitted, and
+  # is NOT counted against per_run - otherwise a block of unresolvable custom
+  # portals would eat a whole run's board budget. They are reported instead, so
+  # the mapper can be pointed at them deliberately.
+  emit_unresolved: false
+
+# ---------------------------------------------------------------- repos
+#
+# The four public new-grad repos, rotated across the night's discover runs so
+# neither run pulls all four: `node scrape-job-repos.mjs --rotate 2`.
+#
+# HONEST NOTE ON THE SAVING: each source is one raw.githubusercontent GET behind
+# a 6-hour cache, so rotating them saves no tokens at all - it only shortens the
+# run and cuts duplicate feed churn. The real "don't read the same job twice"
+# saving is the seen-jobs ledger below, which is where the budget actually went.
+
+repos:
+  per_run: 4
+  cursor_file: data/repo-cursor.json
+  sources: [simplify, zapply-ng, zapply-ds, speedyapply]
+
+# ---------------------------------------------------------------- harvest
+#
+# ADDED 2026-09-10. THE BIGGEST COVERAGE FIX THE PIPELINE HAS HAD.
+#
+# nightly-boards.mjs was already resolving every company to a vendor `api_url`
+# and writing it to data/board-queue.tsv - but the ONLY consumer was the
+# job-scraper LLM agent, so every board it opened cost context and board
+# coverage was rationed by a token budget.
+#
+# Those api_urls are plain JSON endpoints returning each company's FULL job
+# list. nightly-harvest.mjs fetches them in-process for ZERO tokens, so there is
+# no reason to sample: it reads the WHOLE universe, not the rotation slice.
+#
+# Measured on 2026-09-10: 164 callable boards, 161 responded, **18,541 postings
+# in 2.6 seconds**, of which **516 survived every zero-token gate**. The feed had
+# been ~450 rows. Vendors that returned postings: greenhouse 13,659, ashby
+# 4,062, lever 820.
+harvest:
+  enabled: true
+  concurrency: 8
+  timeout_ms: 12000
+
+# ---------------------------------------------------------------- web search
+#
+# ADDED 2026-09-11. Boolean site: search across ATS domains - the only discovery
+# source not bounded by a list we maintain. harvest can only read boards for the
+# 486 companies in company-universe.tsv and the repos only list what they list,
+# so an entry-level Data Analyst req at an unknown employer is invisible to both.
+# This queries the ROLE instead of the company.
+#
+# BACKEND, MEASURED 2026-09-11: DuckDuckGo's HTML endpoint answers an unattended
+# client with **HTTP 202 and an anomaly page**, not a 4xx - so a naive `if
+# (!res.ok)` check treats the block as success and the run reports a cheerful
+# "0 results". The script pins status to 200 and inspects the body, and exits
+# non-zero when every query is blocked.
+#
+# Direct google.com scraping is not an option either: it CAPTCHAs unattended
+# clients within a few queries. For real Google coverage set GOOGLE_CSE_KEY and
+# GOOGLE_CSE_CX (Programmable Search Engine, free tier 100 queries/day) and the
+# script switches backend automatically - that path also gets Google's
+# dateRestrict filter, which enforces the 7-day window at the query instead of
+# downstream.
+#
+# Until a key is set this source contributes nothing. It is wired as OPTIONAL so
+# a blocked search never fails the night.
+
+websearch:
+  enabled: true
+  queries_per_run: 6           # 35 queries total, so ~6 runs sweeps the full set
+  titles_per_query: 4          # OR-groups; one query naming all 27 titles degrades
+  out_file: data/websearch-feed.tsv
+  cursor_file: data/websearch-cursor.json
+  timeout_ms: 12000
+  # RAISED 1500 -> 5000 on 2026-09-12. DuckDuckGo Lite is the working keyless
+  # backend (html.duckduckgo.com 202s; lite.duckduckgo.com returns real results)
+  # but it throttles by IP after a burst - a run of 4 back-to-back queries was
+  # enough to start getting 202s. 6 queries at 5s apart, twice a night, sits
+  # well inside its tolerance.
+  gap_ms: 5000
+
+# ---------------------------------------------------------------- seen jobs
+#
+# Operator instruction: "remember the jobs already read, don't waste in
+# reading the job id again."
+#
+# data/seen-jobs.tsv keys every posting by its normalized URL (tracking params
+# stripped, real job-id params kept) and records how far it got plus its
+# verdict. A TERMINAL verdict (DROP:, SKIP:, BUILT) is never reprocessed. An
+# OPEN sighting stays a live candidate.
+#
+# The old pipeline remembered employers (visa-cache, 90 days) and finished packs
+# (a folder in output/) - but nothing about individual postings. That is why the
+# 2026-09-09 run re-did the 2026-09-08 run's work and surfaced zero new roles.
+
+seen_jobs:
+  ledger_file: data/seen-jobs.tsv
+  prune_after_days: 45         # a posting unseen this long is dropped; BUILT rows are kept forever
+  filter_before_gates: true    # run the filter between the feed and the shortlist
+
+# ---------------------------------------------------------------- linkedin
+#
+# Zero-token guest-endpoint search, added on operator instruction. Terms
+# rotate across runs on their own cursor.
+#
+# f_E is LinkedIn's own experience filter (2=Entry, 3=Associate). Its tagging is
+# noisy both ways, so it only narrows the candidate set - the ACCURACY comes
+# from our own gates (level markers, seniority, years in title, then
+# check-jd-experience.mjs on the JD body).
+#
+# NOTHING here is a visa verdict. LinkedIn has no sponsorship filter and the
+# guest card carries no sponsorship text, so every row is emitted with a blank
+# sponsorship_hint and goes through the normal employer-deduped visa gate.
+#
+# A blank result is NOT a negative: LinkedIn rate-limits by returning an empty
+# fragment with HTTP 200. The script reports per-query status and card counts
+# and says BLOCKED or SUSPECT rather than "no jobs found".
+
+linkedin:
+  enabled: true
+  terms_per_run: 6
+  pages_per_query: 2           # 25 cards a page
+  since_hours: 24
+  experience_levels: "2,3"
+  locations: ["United States"]
+  out_file: data/linkedin-feed.tsv
+  cursor_file: data/linkedin-cursor.json
+  timeout_ms: 10000
+  gap_ms: 1200                 # be a polite guest
+  search_terms:
+    - "Data Analyst"
+    - "Data Scientist"
+    - "Data Engineer"
+    - "AI Engineer"
+    - "GTM Engineer"
+    - "Business Analyst"
+    - "Business Intelligence Analyst"
+    - "Business Intelligence Specialist"
+    - "Analytics Engineer"
+    - "Machine Learning Engineer"
+    - "Forward Deployed Engineer"
+    - "AI Solutions Engineer"
+
+# ---------------------------------------------------------------- models and timeouts
+#
+# One session per step, each with its own model. The old pipeline ran the ENTIRE
+# night in one opus[1m] session, which is why a long visa gate could starve the
+# builds and why a single kill lost everything.
+#
+# Only scoring gets Opus: it is the one judgment call in the pipeline. Extraction
+# and the visa gate are mechanical, and the build agents are sonnet anyway, so
+# the orchestrator dispatching them does not need more.
+
+# Score moved opus -> sonnet on operator instruction.
+#
+# Evidence: the 2026-09-11 runs failed at "Score + queue" in **4 seconds** and
+# the digest carried "You've hit your session limit / resets 10:40am" twice.
+# A 4-second failure is an instant quota rejection, not a timeout and not the
+# firewall the "Connection refused" text implies - other network steps in the
+# same runs succeeded. Scoring was the only Opus step and the largest single
+# consumer in the night.
+models:
+  extract_gate: sonnet
+  # SPLIT OUT 2026-09-11. The visa gate is the highest-stakes judgment in the
+  # pipeline and used to share a session (and a context window) with hundreds of
+  # KB of scraped JD text. It now runs alone, against .claude/agents/visa-evaluator.md.
+  visa_gate: sonnet
+  score: sonnet             # was opus until 2026-09-12; see the note above
+  build: sonnet
+
+# Minutes. A step that overruns is killed and RECORDED, and the next step still
+# runs - the 2026-09-09 run died at 600s and took the whole night with it.
+timeouts_min:
+  # RAISED 40 -> 75 on 2026-09-12, operator call. The 15:09 run timed out
+  # at 40min having extracted 20 of 50 shortlisted postings. The alternative was
+  # cutting the shortlist cap to 30; the operator chose to keep the volume.
+  # WATCH: this pushes the 04:00 run's finish toward 06:00 and spends more quota
+  # before the 09:00 build. If the build starts hitting the session limit again,
+  # this is the first number to reconsider.
+  extract_gate: 75
+  # RAISED 25 -> 45 on 2026-09-12. The first run of the split gate TIMED OUT at
+  # 25min. The split itself worked exactly as intended - extraction finished ok
+  # in 1381s and was PRESERVED, where the old fused step would have thrown it
+  # away - but 25min is not enough to resolve the unique employers behind a
+  # 50-row shortlist at 4 lookups each.
+  visa_gate: 45
+  score: 30
+  # RAISED 120 -> 240 on 2026-09-12 for a manual catch-up run started at 17:50.
+  # MUST stay short enough to finish before the next trigger: MultipleInstances
+  # is IgnoreNew, so a build still running at 23:00 would SKIP that discover run.
+  # 420 for the 2026-09-14 14:20 catch-up (31 packs at ~11min each is ~5.7h).
+  # Ends ~21:20, leaving 100 min before the 23:00 discover trigger. MUST stay
+  # under that gap: MultipleInstances=IgnoreNew means a build still running at
+  # 23:00 SKIPS that discover run, which is how 2026-09-13 lost its whole night.
+  # 180 for the 2026-09-14 16:31 finisher (12 packs at ~4min each is ~45min).
+  # Ends ~19:31, well clear of the 23:00 discover. 420 would have ended 23:31 and
+  # skipped it - MultipleInstances=IgnoreNew, the 2026-09-13 failure.
+  # 240 restored 2026-09-15. It was dropped to 180 for a short catch-up run and
+  # that ceiling then cut the 07:45 build off at 14 of 16 packs. 09:00 + 240 ends
+  # at 13:00, still far clear of the 23:00 discover trigger.
+  build: 240
+
+# ---------------------------------------------------------------- run budget
+#
+# Caps exist so a run cannot sprawl into hours and leave half-built, unlogged
+# packs on disk - that has happened before and is the single worst failure mode
+# of this pipeline.
+#
+# shortlist_to_evaluate applies to each DISCOVER run (23:00 and 04:00), so up
+# to 20 postings a night reach the visa gate.
+#
+# The pack caps apply to the 09:00 BUILD run, which is the only run that writes
+# artifacts. Packs are built STRICTLY SERIALLY, each one verified and logged
+# before the next starts, and the run stops cleanly when budget runs short. That
+# ordering matters more than the number: the 2026-09-08 run started four packs
+# in parallel and died with seven folders holding one file each.
+
+caps:
+  # Raised hard on operator instruction: "scrape as many jobs as possible.
+  # do not leave a single entry level job that opens" plus "do not worry about
+  # the token, that is why there is a 5 hour interval between tasks."
+  #
+  # Context for the numbers: once nightly-harvest.mjs was added, ONE harvest of
+  # 161 boards returned 18,541 postings, and 516 of them survived every
+  # zero-token gate (entry-level, US, target role, not senior, not an intern
+  # req). The old cap of 20 was therefore discarding ~496 qualified postings a
+  # night. The gates are free; only the visa gate and the builds cost anything.
+  # LOWERED 120 -> 50 on 2026-09-12. This reverses part of the 2026-09-10 raise,
+  # and the reason is a ratio, not timidity.
+  #
+  # The build caps are max_full_packs 8 + max_no_deck_packs 4 = 12 packs a day.
+  # At 120 per discover run the night gated and scored 240 postings to build 12
+  # - a 20:1 ratio - and then ran out of quota before the builds happened, which
+  # is the worst possible place to stop. At 50 it is 100 scored for 12 built,
+  # still ample headroom for the visa gate to kill employers.
+  #
+  # The 2026-09-10 raise was also made when 28% of the shortlist was off-target;
+  # the filter fixes on 2026-09-11 took that to 0%, so 50 accurate rows now carry
+  # more real candidates than 120 did then.
+  shortlist_to_evaluate: 50   # postings that reach the visa gate, per DISCOVER run
+  # RAISED 8 -> 20 and 4 -> 16 on 2026-09-12 to clear the 36-row queue in one
+  # pass. Safe to raise because builds are STRICTLY SERIAL and each is verified
+  # and logged before the next starts, so the run degrades by building fewer
+  # packs rather than by leaving half-built folders - which is what the 8/4 cap
+  # was originally protecting against. The real ceiling is the timeout and quota.
+  max_full_packs: 20          # deck-bearing builds in the build run
+  max_no_deck_packs: 16       # 3.0-4.0 builds in the build run
+  serial_builds: true         # never fan out pack-builder; one pack at a time
+  feed_since_days: 7          # only postings from the last 7 days
+  max_visa_lookups: 4         # web lookups per employer; stop at the first hard wall
+  unique_employers_only: true # one visa verdict per EMPLOYER, never per posting
+
+  # Backfill is no longer free. Finishing an incomplete pack counts against
+  # max_full_packs / max_no_deck_packs exactly as a new build does, and
+  # incomplete packs are built FIRST.
+  backfill_counts_against_cap: true
+
+# ---------------------------------------------------------------- experience ceiling
+#
+# Tightened, operator's words: "be very accurate in being entry level roles
+# ... less than 2 years of work experience".
+#
+# max_years is the highest stated minimum a req may demand and still pass. At 2,
+# a req asking "2+ years" passes and "3+ years" is dropped.
+#
+# Enforced in THREE places, all before the visa gate and all at zero token cost:
+#   1. nightly-shortlist.mjs   - the title (years stated in the title, level
+#      markers II/III/IV, senior/staff/principal/lead, people-manager shapes)
+#   2. check-jd-experience.mjs - the JD body, which is the only place the
+#      requirement is usually actually stated
+#   3. block_level_markers     - "Data Scientist II" is not an entry-level req
+#      even though the title states no years at all
+
+experience:
+  max_years: 2
+  block_level_markers: true   # II / III / IV, Level 2+, mid-level, experienced
+
+# ---------------------------------------------------------------- portfolio
+#
+# Routing is per JD and always carries the /ref/{company-slug} suffix so Vercel
+# analytics attribute the visit. There is no default.
+#
+# Routing is by TITLE, not by role family: the data family spans both sides
+# (Data Analyst is analytics, Data Engineer is ml-data), so a family-level rule
+# would send half of it to the wrong portfolio.
+
+portfolio:
+  ml_data_titles:
+    - "data engineer"
+    - "data scientist"
+    - "data science"
+    - "analytics engineer"
+    - "ai engineer"
+    - "ai developer"
+    - "applied ai"
+    - "applied scientist"
+    - "machine learning"
+    - "ml engineer"
+    - "mlops"
+    - "llm"
+    - "generative ai"
+    - "genai"
+    - "nlp"
+    - "research engineer"
+  analytics_titles:
+    - "data analyst"
+    - "business analyst"
+    - "business intelligence"
+    - "bi analyst"
+    - "bi developer"
+    - "bi engineer"
+    - "bi specialist"
+    - "reporting analyst"
+    - "insights analyst"
+    - "analytics analyst"
+    - "decision scientist"
+    - "gtm analyst"
+  # GTM/solutions titles are judged per JD: an AI-heavy FDE req routes to
+  # ml_data, a customer-facing analytics req routes to analytics.
+  default_when_ambiguous: ml_data
+  ref_pattern: "{portfolio}/ref/{company-slug}"

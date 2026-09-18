@@ -1,0 +1,42 @@
+# industries.example.yml — template for config/industries.yml (user layer, gitignored).
+#
+# Agent 1 (industry-company-mapper) reads this file and builds the US company
+# universe from it. nightly-shortlist.mjs also reads it to give a rank bonus to
+# postings whose company or category matches one of your industries.
+#
+# Two accepted shapes. Use the bare string when the industry name is itself a
+# good keyword, and the object form when it is not.
+#
+#   industries:
+#     - Fintech                       # bare: the name is the keyword
+#     - name: Healthcare Technology   # object: name plus explicit keywords
+#       keywords: [healthtech, digital health, ehr, payer, provider]
+#       notes: "No hospital IT contractors."
+#
+# Optional per-industry fields Agent 1 honors:
+#   keywords   extra match terms (default: the name)
+#   exclude    company-name substrings to skip inside this industry
+#   priority   1 (highest) .. 5 — orders which industries get mapped first
+#   notes      free text passed to the agent as context
+
+industries:
+  - name: Artificial Intelligence and ML Infrastructure
+    keywords: [ai, artificial intelligence, machine learning, llm, foundation model, mlops]
+    priority: 1
+
+  - name: Data Infrastructure and Analytics
+    keywords: [data platform, data warehouse, analytics, business intelligence, etl, data pipeline]
+    priority: 1
+
+  - name: Fintech and Payments
+    keywords: [fintech, payments, banking, lending, insurtech, wealth]
+    priority: 2
+
+  - name: Enterprise SaaS
+    keywords: [saas, b2b software, enterprise software, crm, workflow]
+    priority: 2
+
+  - name: Healthcare Technology
+    keywords: [healthtech, digital health, ehr, payer, provider, life sciences]
+    priority: 3
+    exclude: [staffing, locum]
